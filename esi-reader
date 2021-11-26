@@ -15,9 +15,7 @@
 	#    GNU Affero General Public License for more details.
 	#
 	#    You should have received a copy of the GNU Affero General Public License
-	#    along with this program.  If not, see <https://www.gnu.org/licenses/>. 
-	#
-	#    Copyrights at Dominik Bernhardt, 2021, domasprogrammer@gmail.com or https://github.com/DomAsProgrammer
+	#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 =end license
 =cut
@@ -74,7 +72,10 @@
 	v1.8 
 	Implemented version check
 
-	v1.8.1 WORK
+	v1.8.1
+	Added ANALYZE on critical positons for database optimization
+
+	v1.8.2 WORK
 	Repaired err_msg() to show proper error message
 
 =end Version_history
@@ -119,7 +120,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.8";
+my $app_version		= "v1.8.1";
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -1754,6 +1755,8 @@ elsif ( -s $database ) {
 						# This is importent and must not be killed!
 						local $SIG{INT}		= "IGNORE";
 						local $SIG{HUP}		= "IGNORE";
+						&access_DB("ANALYZE orders_structures;");
+						&access_DB("ANALYZE orders_stations;");
 						&access_DB("UPDATE characters SET last_update_markets = " . &quote_DB($finish_time) . " WHERE id == " . &quote_DB($char_id) . " ;");
 						exit(0);
 						}
@@ -2381,7 +2384,6 @@ elsif ( -s $database ) {
 
 							# Remove all orders, which seem to be from forbidden structures
 							&access_DB("DELETE FROM orders_structures WHERE orders_structures.location_id IN ( SELECT ms.location_id FROM missing_structures ms WHERE ms.character_id == " . &quote_DB($char_id) . " ) AND orders_structures.character_id == " . &quote_DB($char_id) . " ;");
-							#&access_DB("VACUUM;");
 
 							# Report to main window
 							$perc_count	+= 4;
@@ -2406,7 +2408,8 @@ elsif ( -s $database ) {
 							"WHERE id == " . &quote_DB($char_id) . ";"
 							);
 
-						#&access_DB("VACUUM;");
+						&access_DB("ANALYZE orders_stations;");
+						&access_DB("ANALYZE orders_structures;");
 						}
 					else {
 						$perc_count	+= 270;
@@ -3708,6 +3711,7 @@ elsif ( -s $database ) {
 						$ac_knot->shunlock;
 						$old_st_as			= "start+all";
 						$omitt_reset			= 1;
+						&access_DB("ANALYZE;");
 						&access_DB("VACUUM;");
 						}
 
@@ -4283,6 +4287,7 @@ elsif ( -s $database ) {
 		if ( $user_add ) {
 			&pprop_exit(1);
 			&win_setup("man_appIdKey");
+			&debug_out("Exiting...");
 			exit(0);
 			}
 		elsif ( $start ) {
@@ -10236,6 +10241,13 @@ sub check_version {
 				return(0);
 				},
 			},
+		{
+			version => "v1.8.1",
+			update => sub {
+				&debug_out(qq{No changes for database infrastructure, just runtime optimization});
+				return(1);
+				},
+			},
 		#{
 			#version => "v1.",
 			#update => sub {
@@ -10464,6 +10476,7 @@ sub pprop_exit {
 		move("$database.tmp", "$database.bak") or print STDERR "Can't create backup file!\n";
 		&db_lock(0);
 		(tied(%transport))->remove;
+		&debug_out("Exiting...");
 		exit(0);
 		}
 	}
@@ -10739,7 +10752,8 @@ sub access_DB {
 	my $statement	= shift;
 	my $pt_switch	= shift;
 	my $is_select	= 0;
-	my $is_vaccum	= 0;
+	my $is_vacuum	= 0;
+	my $is_analyze	= 0;
 	my $db_knot	= tie(my %DB_carrier, 'IPC::Shareable', $transID);
 
 	if ( $statement !~ m/;(?:\s|\s--.+)*$/p ) {
@@ -10754,8 +10768,12 @@ sub access_DB {
 		&debug_out("access_DB(): Statement is only a select");
 		}
 	elsif ( $statement =~ m/^VACUUM;?$/i ) {
-		$is_vaccum	= 1;
+		$is_vacuum	= 1;
 		&debug_out("access_DB(): Statement requests to VACUUM");
+		}
+	elsif ( $statement =~ m/^ANALYZE;?$/i ) {
+		$is_analyze	= 1;
+		&debug_out("access_DB(): Statement requests to ANALYZE");
 		}
 
 	$statement	=~ s/;(?:\s|\s--.+)*$//; 
@@ -10813,6 +10831,12 @@ sub access_DB {
 	local $SIG{HUP}	= \$_sub_stop;
 	local $SIG{INT}	= \$_sub_stop;
 
+	my $_sub_analyze = sub {
+    		local $dbh->{AutoCommit} = 1;
+    		$dbh->do("ANALYZE");
+    		return(1);
+		};
+
 	my $_sub_vacuum	= sub {
     		local $dbh->{AutoCommit} = 1;
     		$dbh->do("VACUUM");
@@ -10820,9 +10844,17 @@ sub access_DB {
 		};
 
 	# Enforce foreign key check for write access
-	if ( $is_vaccum ) {
+	if ( $is_vacuum ) {
 		#$dbh->commit();
 		&{$_sub_vacuum}();
+		#$dbh->commit();
+		$dbh->disconnect();
+		&db_token(0, $pt_switch);
+		return(1);
+		}
+	elsif ( $is_analyze ) {
+		#$dbh->commit();
+		&{$_sub_analyze}();
 		#$dbh->commit();
 		$dbh->disconnect();
 		&db_token(0, $pt_switch);
