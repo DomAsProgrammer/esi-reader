@@ -20,7 +20,7 @@
 =end license
 =cut
 
-=begin Version_history
+=begin change_logs
 
 	v1.0
 	System running with most functions as expected
@@ -73,14 +73,19 @@
 	Implemented version check
 
 	v1.8.1
-	Added ANALYZE on critical positons for database optimization
+	Added ANALYZE on critical positons for database
+	optimization
 
 	v1.8.2
 	Repaired err_msg() to show proper error message
 	Reduced RAM usage by more frequently writes to database
 	Optional scrollbar for interactive frame
 
-=end Version_history
+	v1.8.2.1
+	Small bugfix to prevent usage of non-existent array
+	elements and better error output
+
+=end change_logs
 =cut
 
 use strict;
@@ -98,6 +103,7 @@ use Tk::ProgressBar;			# Really needed?	YES
 use Tk::Optionmenu;			# Really needed?	YES
 use Tk::BrowseEntry;			# Really needed?	YES
 use Tk::Labelframe;
+use Tk::Pane;
 use Tk::HList;				# Really needed?	YES
 use List::Util qw(shuffle);
 use JSON;
@@ -123,7 +129,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.8.2";
+my $app_version		= "v1.8.2.1";
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -10264,24 +10270,32 @@ sub check_version {
 		{
 			version => "v1.8",
 			update => sub {
-				&debug_out(qq{Your database is to old! Database upgrades are supported since version 1.8, not before.\n} .
-					qq{Delete your database and let us create a new one. (Database file: "$database")});
-				print STDERR qq{Your database is to old! Database upgrades are supported since version 1.8, not before.\n} .
-					qq{Delete your database and let us create a new one. (Database file: "$database"};
+				my $text	= qq{update_to_1_8(): Your database is to old! Database upgrades are supported since version 1.8, not before.\n} .
+					qq{update_to_1_8(): Delete your database and let us create a new one. (Database file: "$database"};
+				&debug_out($text);
+				print STDERR qq{$text\n};
+				&err_msg(undef, 3, $MainTitle, $text);
 				return(0);
 				},
 			},
 		{
 			version => "v1.8.1",
 			update => sub {
-				&debug_out(qq{No changes for database infrastructure, just runtime optimization});
+				&debug_out(qq{update_to_1_8_1(): No changes for database infrastructure, just runtime optimization});
 				return(1);
 				},
 			},
 		{
 			version => "v1.8.2",
 			update => sub {
-				&debug_out(qq{No changes for database infrastructure, just runtime and UI optimization});
+				&debug_out(qq{update_to_1_8_2(): No changes for database infrastructure, just runtime and UI optimization});
+				return(1);
+				},
+			},
+		{
+			version => "v1.8.2.1",
+			update => sub {
+				&debug_out(qq{update_to_1_8_2_1(): No changes for database infrastructure, just runtime and UI optimization});
 				return(1);
 				},
 			},
@@ -10302,24 +10316,32 @@ sub check_version {
 		my $db_version		= $db_version->{version};	# Easier access
 
 		# Execute updates unless we reach same version
-		while ( version->parse($db_version) < version->parse($app_version) ) {
+		while ( defined($db_version) && version->parse($db_version) < version->parse($app_version) && @updates ) {
 			my $new		= shift(@updates);
-			if ( version->parse($db_version) < version->parse($new->{version}) ) {
-				&debug_out(qq{Updating $db_version database...});
-				if ( defined($new->{update}) && ref($new->{update}) eq "SUB" && &{$new->{update}}() ) {	# Apply changes
-					&debug_out("Update succeded!");
-					&access_DB("UPDATE characters SET version = " . &quote_DB($new->{version}) . " ;");	# Database upgrades apply to all users
-					$db_version	= $new->{version};
+			if ( defined($new) && ref($new) eq "HASH" && defined($new->{version}) ) {
+				if ( version->parse($db_version) < version->parse($new->{version}) ) {
+					&debug_out(qq{check_version(): Updating database infrastructure to $db_version ...});
+					if ( defined($new->{update}) && ref($new->{update}) eq "CODE" && &{$new->{update}}() ) {	# Apply changes
+						&access_DB(qq{UPDATE characters SET version = } . &quote_DB($new->{version}) . qq{ ;});	# Database upgrades apply to all users
+						$db_version	= $new->{version};
+						&debug_out(qq{check_version(): Database infrastructure update succeded! New version: $db_version});
+						}
+					else {
+						my $text	= qq{check_version(): Database infrastructure update failed!};
+						&debug_out($text);
+						&err_msg(undef, 3, $MainTitle, $text);
+						return(0);
+						}
 					}
-				else {
-					&debug_out("Update failed!");
-					return(0);
-					}
+				}
+			else {
+				&debug_out(qq{check_version(): FATAL: Mailformed element in \@updates !});
+				exit(126);
 				}
 			}
 
 		if ( version->parse($app_version) < version->parse($db_version) ) {
-			my $text	= qq{Your database is to new: $db_version, while your're running $app_name $app_version .\n} .
+			my $text	= qq{check_version(): Your database is to new: $db_version, while your're running $app_name $app_version .\n} .
 				qq{This is not a good idea and will lead to program crashes. Make sure you started $app_name from correct file or check online for updates!};
 			&debug_out($text);
 			print STDERR qq{$text\n};
