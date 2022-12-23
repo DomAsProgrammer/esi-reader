@@ -10257,6 +10257,7 @@ sub helper {
 
 sub check_version {
 	my @versions		= &access_DB("SELECT version FROM characters ;");
+	my $app_version		= "$app_version";
 
 	# Upgrade procedures
 	my @updates		= (
@@ -10277,6 +10278,13 @@ sub check_version {
 				return(1);
 				},
 			},
+		{
+			version => "v1.8.2",
+			update => sub {
+				&debug_out(qq{No changes for database infrastructure, just runtime and UI optimization});
+				return(1);
+				},
+			},
 		#{
 			#version => "v1.",
 			#update => sub {
@@ -10285,36 +10293,37 @@ sub check_version {
 		);
 
 	# Make numbers version conform
-	foreach ( @versions, @updates ) { $_->{version} =~ s/^v?/v/i; }
-	my $app_version		= "$app_version";
-	$app_version		=~ s/^v?/v/i;
+	foreach ( @versions, @updates ) { $_->{version}		=~ s/^v?/v/i; }
+ 	$app_version						=~ s/^v?/v/i; 
 
 	upgrade_from_newest:
+	# Will only run one time
 	foreach my $db_version ( sort { version->parse($b->{version}) <=> version->parse($a->{version}) } @versions ) {
-		my $db_version	= $db_version->{version};	# Easier access
+		my $db_version		= $db_version->{version};	# Easier access
 
-		if ( version->parse($db_version) < version->parse($app_version) ) {
-
-			&debug_out(qq{Updating $db_version database...});
-			foreach my $new ( sort { version->parse($a->{version}) <=> version->parse($b->{version}) } @updates ) {
-				if ( version->parse($db_version) < version->parse($new->{version}) ) {
-					if ( &{$new->{update}}() ) {	# Apply changes
-						&debug_out("Update succeded!");
-						&access_DB("UPDATE characters SET version = " . &quote_DB($new->{version}) . " ;");	# Database upgrades apply to all users
-						$db_version	= $new->{version};
-						}
-					else {
-						&debug_out("Update failed!");
-						return(0);
-						}
+		# Execute updates unless we reach same version
+		while ( version->parse($db_version) < version->parse($app_version) ) {
+			my $new		= shift(@updates);
+			if ( version->parse($db_version) < version->parse($new->{version}) ) {
+				&debug_out(qq{Updating $db_version database...});
+				if ( defined($new->{update}) && ref($new->{update}) eq "SUB" && &{$new->{update}}() ) {	# Apply changes
+					&debug_out("Update succeded!");
+					&access_DB("UPDATE characters SET version = " . &quote_DB($new->{version}) . " ;");	# Database upgrades apply to all users
+					$db_version	= $new->{version};
+					}
+				else {
+					&debug_out("Update failed!");
+					return(0);
 					}
 				}
 			}
-		elsif ( version->parse($app_version) < version->parse($db_version) ) {
-			&debug_out(qq{Your database is to new: $db_version, while your're running $app_name $app_version .\n} .
-				qq{This is not a good idea and will lead to program crashes. Make sure you started $app_name from correct file or check online for updates!});
-			print STDERR qq{Your database is to new: $db_version, while your're running $app_name $app_version .\n} .
+
+		if ( version->parse($app_version) < version->parse($db_version) ) {
+			my $text	= qq{Your database is to new: $db_version, while your're running $app_name $app_version .\n} .
 				qq{This is not a good idea and will lead to program crashes. Make sure you started $app_name from correct file or check online for updates!};
+			&debug_out($text);
+			print STDERR qq{$text\n};
+			&err_msg(undef, 3, $MainTitle, $text);
 			return(0);
 			}
 
