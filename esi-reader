@@ -85,6 +85,12 @@
 	Small bugfix to prevent usage of non-existent array
 	elements and better error output
 
+	v1.9
+	Database outputs now consistent after zero digits for
+	prices and volume m³
+	Numbers in main table and purchase table are aligned to
+	the right now
+
 =end change_logs
 =cut
 
@@ -105,6 +111,7 @@ use Tk::BrowseEntry;			# Really needed?	YES
 use Tk::Labelframe;
 use Tk::Pane;
 use Tk::HList;				# Really needed?	YES
+use Tk::ItemStyle;
 use List::Util qw(shuffle);
 use JSON;
 use MIME::Base64;
@@ -119,9 +126,9 @@ use feature "current_sub";
 
 ### Output handle for Non-shell application
 print STDERR "WARNING: Any further output will be written to /tmp/esi-reader.out and /tmp/esi-reader.err\n";
-close(STDOUT);
-close(STDIN);
-close(STDERR);
+close(STDOUT) or die qq{FATAL ERROR};
+close(STDIN) or die qq{FATAL ERROR};
+close(STDERR) or die qq{FATAL ERROR};
 open(STDOUT, ">", "/tmp/esi-reader.out") or die "Can't write STDOUT file!\n";
 open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 
@@ -129,7 +136,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.8.2.1";
+my $app_version		= "v1.9";
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -443,6 +450,13 @@ my %def_HL		= (	# List
 	-selectbackground	=> "#2b2b2b",
 	-foreground		=> $def_fg_hex,
 	-background		=> $def_bg_hex,
+	-itemtype		=> "text",
+	);
+my %def_itemstyle	= (	# List
+	-selectforeground	=> $def_HL{-selectforeground},
+	-selectbackground	=> $def_HL{-selectbackground},
+	-foreground		=> $def_HL{-foreground},
+	-background		=> $def_HL{-background},
 	);
 my %def_Header		= (	# HList header
 	-headerbackground	=> $def_bg_hex,
@@ -4424,6 +4438,7 @@ elsif ( -s $database ) {
 	my $old_baset		= "";		# Old base_table value
 	my $old_basei		= "";		# Old base_ignores value
 	#my $order_by		= "";		# DISABLED - optionally set order sting, but this is already done for the views in SQL
+	my $pretty_num_set	= "";		# List of special SELECT patterns
 	my @header		= ();		# Also needed for ignores window later
 	#my $sort_option		=  0;		# Boolean for sorting via profit_qm (profit per m³)
 	my @purchased_header	= (
@@ -4432,11 +4447,11 @@ elsif ( -s $database ) {
 
 		# Quantity & space
 		{ dbn	=> "quantity",			pretty	=> "Quantity (units)" },
-		{ dbn	=> "needed_space",		pretty	=> "Required cargo (m³)" },
+		{ dbn	=> "needed_space_pretty",	pretty	=> "Required cargo (m³)" },
 
 		# Unit prices
-		{ dbn	=> "sell_price",		pretty	=> "Purchase price p.u. (ISK)" },
-		{ dbn	=> "buy_price",			pretty	=> "Sales price p.u. (ISK)" },
+		{ dbn	=> "sell_price_pretty",		pretty	=> "Purchase price p.u. (ISK)" },
+		{ dbn	=> "buy_price_pretty",		pretty	=> "Sales price p.u. (ISK)" },
 
 		# Locations & distance
 		{ dbn	=> "from_location",		pretty	=> "Pickup location" },
@@ -4444,12 +4459,12 @@ elsif ( -s $database ) {
 		{ dbn	=> "to_location",		pretty	=> "Drop-off location" },
 
 		# Further Details
-		{ dbn	=> "investment",		pretty	=> "Required investment (ISK)" },
-		{ dbn	=> "profit",			pretty	=> "Possible profit total (ISK)" },	# Tax is subtracted here
-		{ dbn	=> "revenue",			pretty	=> "Revenue total (ISK)" },
-		{ dbn	=> "profit_qm",			pretty	=> "Profit per m³ (ISK)" },
-		{ dbn	=> "profit_jump",		pretty	=> "Profit per jump (ISK)" },
-		{ dbn	=> "profit_qm_jump",		pretty	=> "Profit per m³ per jump (ISK)" },
+		{ dbn	=> "investment_pretty",		pretty	=> "Required investment (ISK)" },
+		{ dbn	=> "profit_pretty",		pretty	=> "Possible profit total (ISK)" },	# Tax is subtracted here
+		{ dbn	=> "revenue_pretty",		pretty	=> "Revenue total (ISK)" },
+		{ dbn	=> "profit_qm_pretty",		pretty	=> "Profit per m³ (ISK)" },
+		{ dbn	=> "profit_jump_pretty",	pretty	=> "Profit per jump (ISK)" },
+		{ dbn	=> "profit_qm_jump_pretty",	pretty	=> "Profit per m³ per jump (ISK)" },
 
 		# IDs
 		{ dbn	=> "sell_id",			pretty	=> "Order id (seller)" },
@@ -5473,21 +5488,46 @@ elsif ( -s $database ) {
 				&priority_lock(1);
 				&db_lock(1, "decontrol");
 				}
-			@purchased_list	= &access_DB("SELECT * FROM purchased WHERE character_id = " . &quote_DB($character_id) . " ORDER BY to_location ;");
+			@purchased_list	= &access_DB(qq{SELECT } .
+				qq{printf("%.3f", needed_space) AS needed_space_pretty, } .
+				qq{printf("%.2f", sell_price) AS sell_price_pretty, } .
+				qq{printf("%.2f", buy_price) AS buy_price_pretty, } .
+				qq{printf("%.2f", investment) AS investment_pretty, } .
+				qq{printf("%.2f", profit) AS profit_pretty, } .
+				qq{printf("%.2f", revenue) AS revenue_pretty, } .
+				qq{printf("%.2f", profit_qm) AS profit_qm_pretty, } .
+				qq{printf("%.2f", profit_jump) AS profit_jump_pretty, } .
+				qq{printf("%.2f", profit_qm_jump) AS profit_qm_jump_pretty, } .
+				qq{* FROM purchased WHERE character_id = } . &quote_DB($character_id) . qq{ ORDER BY to_location ;}
+				);
 			if ( ! $priority_lock ) {
 				&db_lock(0);
 				&priority_lock(0);
 				}
 
+			my $justified_right	= $purchased_table->ItemStyle(
+				"text",
+				%def_itemstyle,
+				-justify	=> "right",
+				);
 			for ( my $row = 0 ; $row < scalar(@purchased_list) ; $row++ ) {
 				$purchased_table->add($row);
 				for ( my $col = 0 ; $col < scalar(@purchased_header) ; $col++ ) {
-					$purchased_table->item(
-						"create",
-						$row,
-						$col,
-						-text			=> &human_readable($purchased_list[$row]->{$purchased_header[$col]->{dbn}}),
-						);
+					if ( &is_number($purchased_list[$row]->{$purchased_header[$col]->{dbn}}) ) {
+						$purchased_table->itemCreate(
+							$row,
+							$col,
+							-text		=> &human_readable($purchased_list[$row]->{$purchased_header[$col]->{dbn}}) . "  ",
+							-style		=> $justified_right,
+							);
+						}
+					else {
+						$purchased_table->itemCreate(
+							$row,
+							$col,
+							-text		=> &human_readable($purchased_list[$row]->{$purchased_header[$col]->{dbn}}) . "  ",
+							);
+						}
 					}
 				}
 			}
@@ -6180,35 +6220,45 @@ elsif ( -s $database ) {
 			);
 
 		if ( $base_table eq "hauls" ) {
-			#$order_by	= "ORDER BY profit DESC, investment, needed_space";
+			$pretty_num_set	=
+				qq{printf("%.2f", profit) AS profit_pretty, } .
+				qq{printf("%.2f", profit_qm) AS profit_qm_pretty, } .
+				qq{printf("%.2f", profit_jump) AS profit_jump_pretty, } .
+				qq{printf("%.2f", profit_qm_jump) AS profit_qm_jump_pretty, } .
+				qq{printf("%.2f", investment) AS investment_pretty, } .
+				qq{printf("%.2f", revenue) AS revenue_pretty, } .
+				qq{printf("%.2f", sell_price) AS sell_price_pretty, } .
+				qq{printf("%.2f", buy_price) AS buy_price_pretty, } .
+				qq{printf("%.3f", packaged_volume) AS packaged_volume_pretty, } .
+				qq{printf("%.3f", needed_space) AS needed_space_pretty, };
 			# sell_id     buy_id      character_id  type_id     investment  profit      good        needed_space  packaged_volume  from_location                          from_region  from_rid    from_constellation  from_cid    from_system  from_sid    from_sys_security  from_structure_station  from_ssid   sell_price  quantity    to_location                           to_region   to_rid      to_constellation  to_cid      to_system   to_sid      to_sys_security  to_structure_station  to_ssid     buy_price
 			@header		= (
 				# Good to trade
 				{ dbn	=> "good",			pretty	=> "Type" },
 				{ dbn	=> "sell_id",			pretty	=> "Order id (seller)" },
 				{ dbn	=> "buy_id",			pretty	=> "Order id (buyer)" },
-				{ dbn	=> "profit",			pretty	=> "Possible profit total (ISK)" },	# Tax and investment is subtracted here
-				{ dbn	=> "profit_qm",			pretty	=> "Profit per m³ (ISK)" },
-				{ dbn	=> "profit_jump",		pretty	=> "Profit per jump (ISK)" },
-				{ dbn	=> "profit_qm_jump",		pretty	=> "Profit per m³ per jump (ISK)" },
-				{ dbn	=> "investment",		pretty	=> "Required investment (ISK)" },
-				{ dbn	=> "revenue",			pretty	=> "Revenue total (ISK)" },		# Without investment
+				{ dbn	=> "profit_pretty",		pretty	=> "Possible profit total (ISK)" },	# Tax and investment is subtracted here
+				{ dbn	=> "profit_qm_pretty",		pretty	=> "Profit per m³ (ISK)" },
+				{ dbn	=> "profit_jump_pretty",	pretty	=> "Profit per jump (ISK)" },
+				{ dbn	=> "profit_qm_jump_pretty",	pretty	=> "Profit per m³ per jump (ISK)" },
+				{ dbn	=> "investment_pretty",		pretty	=> "Required investment (ISK)" },
+				{ dbn	=> "revenue_pretty",		pretty	=> "Revenue total (ISK)" },		# Without investment
 
 				# Pickup location
 				{ dbn	=> "quantity",			pretty	=> "Quantity (units)" },
-				{ dbn	=> "sell_price",		pretty	=> "Purchase price p.u. (ISK)" },
+				{ dbn	=> "sell_price_pretty",		pretty	=> "Purchase price p.u. (ISK)" },
 				{ dbn	=> "from_structure_station",	pretty	=> "Pickup location" },
 
 				# Distance
 				{ dbn	=> "jumps",			pretty	=> "Jumps" },
 
 				# Drop-off location
-				{ dbn	=> "buy_price",			pretty	=> "Sales price p.u. (ISK)" },
+				{ dbn	=> "buy_price_pretty",		pretty	=> "Sales price p.u. (ISK)" },
 				{ dbn	=> "to_structure_station",	pretty	=> "Drop-off location" },
 
 				# Further Details
-				{ dbn	=> "packaged_volume",		pretty	=> "Packaged volume p.u. (m³)" },
-				{ dbn	=> "needed_space",		pretty	=> "Required cargo (m³)" },
+				{ dbn	=> "packaged_volume_pretty",	pretty	=> "Packaged volume p.u. (m³)" },
+				{ dbn	=> "needed_space_pretty",	pretty	=> "Required cargo (m³)" },
 				{ dbn	=> "sell_issued",		pretty	=> "Issued (seller)" },
 				{ dbn	=> "buy_issued",		pretty	=> "Issued (buyer)" },
 				);
@@ -6316,14 +6366,16 @@ elsif ( -s $database ) {
 				}
 			}
 		elsif ( $base_table eq "orders_sells" ) {
-			#$order_by	= "ORDER BY os.price, os.volume_remain DESC";
+			$pretty_num_set	=
+				qq{printf("%.2f", price) AS price_pretty, } .
+				qq{printf("%.3f", packaged_volume) AS packaged_volume_pretty, };
 			# orders_sells(volume_total,volume_remain,price,duration,issued,good,packaged_volume,location,system,security_status,constellation,region,source_table)
 			@header		= (
 				{ dbn	=> "good",			pretty	=> "Type" },
 				{ dbn	=> "volume_remain",		pretty	=> "Quantity (units)" },
-				{ dbn	=> "price",			pretty	=> "Price (ISK)" },
+				{ dbn	=> "price_pretty",		pretty	=> "Price (ISK)" },
 				{ dbn	=> "location",			pretty	=> "Location" },	# Station / Structure
-				{ dbn	=> "packaged_volume",		pretty	=> "Volume per unit (packaged) (m³)" },
+				{ dbn	=> "packaged_volume_pretty",	pretty	=> "Volume per unit (packaged) (m³)" },
 				{ dbn	=> "range",			pretty	=> "Range" },
 				{ dbn	=> "issued",			pretty	=> "Issued" },
 				{ dbn	=> "id",			pretty	=> "Order id (seller)" },
@@ -6384,14 +6436,16 @@ elsif ( -s $database ) {
 				}
 			}
 		elsif ( $base_table eq "orders_buys" ) {
-			#$order_by	= "ORDER BY os.price DESC, os.volume_remain DESC";
+			$pretty_num_set	=
+				qq{printf("%.2f", price) AS price_pretty, } .
+				qq{printf("%.3f", packaged_volume) AS packaged_volume_pretty, };
 			# orders_buys(volume_total,volume_remain,price,duration,issued,"good,packaged_volume,location,system,security_status,constellation,region,source_table)
 			@header		= (
 				{ dbn	=> "good",			pretty	=> "Type" },
 				{ dbn	=> "volume_remain",		pretty	=> "Quantity (units)" },
-				{ dbn	=> "price",			pretty	=> "Price (ISK)" },
+				{ dbn	=> "price_pretty",		pretty	=> "Price (ISK)" },
 				{ dbn	=> "location",			pretty	=> "Location" },	# Station / Structure
-				{ dbn	=> "packaged_volume",		pretty	=> "Volume per unit (packaged) (m³)" },
+				{ dbn	=> "packaged_volume_pretty",	pretty	=> "Volume per unit (packaged) (m³)" },
 				{ dbn	=> "range",			pretty	=> "Range" },
 				{ dbn	=> "issued",			pretty	=> "Issued" },
 				{ dbn	=> "id",			pretty	=> "Order id (buyer)" },
@@ -6489,7 +6543,7 @@ elsif ( -s $database ) {
 					);
 			$table		= $table_frame->HList(
 				%def_HL,
-				-columns		=> scalar(@header),	# Creates columns belonging to the count of header
+				-columns		=> scalar(@header),		# Creates columns belonging to the count of header
 				#-command		=>				# Defines, what should be done on double clicking an entry, but see below
 				-browsecmd		=> \$_sub_fill_info_section,	# Defines, what should be done if something is selected
 				-yscrollcommand		=> [
@@ -6579,7 +6633,7 @@ elsif ( -s $database ) {
 		if ( $base_table eq "hauls" ) {
 			# Get table list
 			# The grep was missed in the base build
-			@full_list	= grep { $_->{character_id} == $character_id } &access_DB("SELECT * FROM $base_table ;");	# This is most time to slow # where and order by clause must be done via Perl to increase speed ( @filter and &{$_sub_sort} )
+			@full_list	= grep { $_->{character_id} == $character_id } &access_DB(qq{SELECT ${pretty_num_set}* FROM $base_table ;});	# This is most time to slow # where and order by clause must be done via Perl to increase speed ( @filter and &{$_sub_sort} )
 			#@full_list	= &main_table_perl_join($character_id);	# On much rows it is very slow compared to SQL
 
 			@ignores_sb_id	= grep { !( exists($_->{auto}) ) } @ignores_sb_id;	# Remove all automatically added entries
@@ -6623,7 +6677,7 @@ elsif ( -s $database ) {
 			}
 		else {
 			# Get table list
-			@full_list	= &access_DB("SELECT * FROM $base_table $where $sort_helper ;");
+			@full_list	= &access_DB("SELECT ${pretty_num_set}* FROM $base_table $where $sort_helper ;");
 
 			$mc_helper	= ( scalar(@full_list) == 1 ) ? "1 order match your criteria" : &human_readable(scalar(@full_list)) . " orders match your criteria";
 			}
@@ -6669,16 +6723,30 @@ elsif ( -s $database ) {
 		&priority_lock(0);
 		$priority_lock	= 0;
 
+		my $justified_right	= $table->ItemStyle(
+			"text",
+			%def_itemstyle,
+			-justify	=> "right",
+			);
 		# Insert database data into table
 		for ( my $row = 0 ; $row < scalar(@full_list) ; $row++ ) {
-			$table->add($row);
+			$table->add($row,);
 			for ( my $column = 0 ; $column < scalar(@header) ; $column++ ) {
-				$table->item(
-					"create",
-					$row,
-					$column,
-					-text			=> &human_readable($full_list[$row]->{$header[$column]->{dbn}}),
-					);
+				if ( &is_number($full_list[$row]->{$header[$column]->{dbn}}) ) {
+					$table->itemCreate(
+						$row,
+						$column,
+						-text		=> &human_readable($full_list[$row]->{$header[$column]->{dbn}}) . "  ",
+						-style		=> $justified_right,
+						);
+					}
+				else {
+					$table->itemCreate(
+						$row,
+						$column,
+						-text		=> &human_readable($full_list[$row]->{$header[$column]->{dbn}}),
+						);
+					}
 				}
 			}
 
@@ -10261,6 +10329,7 @@ sub helper {
 		}
 	}
 
+# Apply updates
 sub check_version {
 	my @versions		= &access_DB("SELECT version FROM characters ;");
 	my $app_version		= "$app_version";
@@ -10271,7 +10340,7 @@ sub check_version {
 			version => "v1.8",
 			update => sub {
 				my $text	= qq{update_to_1_8(): Your database is to old! Database upgrades are supported since version 1.8, not before.\n} .
-					qq{update_to_1_8(): Delete your database and let us create a new one. (Database file: "$database"};
+					qq{update_to_1_8(): Delete your database and let us create a new one. (Database file: "$database")};
 				&debug_out($text);
 				print STDERR qq{$text\n};
 				&err_msg(undef, 3, $MainTitle, $text);
@@ -10299,6 +10368,13 @@ sub check_version {
 				return(1);
 				},
 			},
+		{
+			version => "v1.9",
+			update => sub {
+				&debug_out(qq{update_to_1_9(): No changes for database infrastructure, just UI optimization});
+				return(1);
+				},
+			},
 		#{
 			#version => "v1.",
 			#update => sub {
@@ -10320,7 +10396,7 @@ sub check_version {
 			my $new		= shift(@updates);
 			if ( defined($new) && ref($new) eq "HASH" && defined($new->{version}) ) {
 				if ( version->parse($db_version) < version->parse($new->{version}) ) {
-					&debug_out(qq{check_version(): Updating database infrastructure to $db_version ...});
+					&debug_out(qq{check_version(): Updating database infrastructure to $new->{version} ...});
 					if ( defined($new->{update}) && ref($new->{update}) eq "CODE" && &{$new->{update}}() ) {	# Apply changes
 						&access_DB(qq{UPDATE characters SET version = } . &quote_DB($new->{version}) . qq{ ;});	# Database upgrades apply to all users
 						$db_version	= $new->{version};
@@ -10521,6 +10597,20 @@ sub is_ccp_station {
 		}
 	# Orders of stations from 1_021_010_937_882 to 1_032_811_159_323 are the current structures generated by players (stand 2020-03-27)
 	else {
+		return(0);
+		}
+	}
+
+sub is_number {
+	my $element		= shift;
+
+	# Integer or floating point
+	if ( $element =~ m/^[0-9]+(\.[0-9]+)?$/ ) {
+		#&debug_out(qq{is_number(): "$element" is a number});		# Activate only when really needed, decreasing speed enormusly
+		return(1);
+		}
+	else {
+		#&debug_out(qq{is_number(): "$element" is not a number});	# Activate only when really needed, decreasing speed enormusly
 		return(0);
 		}
 	}
