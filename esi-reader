@@ -107,6 +107,11 @@
 	v1.9.3
 	Stability increase of main agent
 
+	v1.10
+	If someone might use the application for several days
+	without restarting the app, now every twelve hours the
+	database will be cleaned up (vacuum)
+
 =end change_logs
 =cut
 
@@ -152,7 +157,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.9.3";
+my $app_version		= "v1.10";	# also see &check_version() !
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -612,7 +617,6 @@ elsif ( -s $database ) {
 			mode	=> 0600,
 			destroy	=> 1,
 			size	=> IPC::Shareable::SHM_BUFSIZ(),
-			#size	=> 131072 * 2,
 			});
 
 		## Markets update agents (mua) (for run_update == perm)
@@ -627,7 +631,9 @@ elsif ( -s $database ) {
 			primary			=> time,
 			non_primary		=> time,
 			structures		=> time,
+			last_cleanup		=> time,
 			);
+		my $cleanup_hours		= 12;		# run vacuum all twelve hours at least
 
 		# Static lists from database
 		my @mua_static_primary		= ();
@@ -668,8 +674,8 @@ elsif ( -s $database ) {
 			&cprop_exit();
 			};
 
-		local $SIG{INT}		= $_sub_cprop_exit;
-		local $SIG{HUP}		= $_sub_cprop_exit;
+		local $SIG{INT}		= \&{$_sub_cprop_exit}();
+		local $SIG{HUP}		= \&{$_sub_cprop_exit}();
 
 		# Array to store what was transfered through @receiver, because IPC-tied arrays are very small (round about 300 elements only)
 		my @storage	= ();
@@ -1013,6 +1019,13 @@ elsif ( -s $database ) {
 		update_agent:
 		while ( kill(0 => $ppid) ) {	# Live as long as the parent does...
 
+			# Run vacuum all $cleanup_hours hours at least
+			if ( $time{last_cleanup} < ( time - 1 - 60 ** 2 * $cleanup_hours ) ) {
+				&access_DB(qq{VACUUM;});
+				&access_DB(qq{ANALYZE;});
+				$time{last_cleanup}	= time;
+				}
+
 			$ac_knot->shlock;
 			if ( $agent_carrier{run_update} eq "perm" ) {
 				$char_id		= $agent_carrier{CharacterID};
@@ -1352,7 +1365,7 @@ elsif ( -s $database ) {
 					# Failure
 					else {
 						&debug_out("permanent_update_manager(): Can't fork");
-						&pprop_exit();
+						&{$_sub_cprop_exit}();
 						}
 					}
 
@@ -1606,7 +1619,7 @@ elsif ( -s $database ) {
 					# Failure
 					else {
 						&debug_out("permanent_update_manager(): Can't fork");
-						&pprop_exit();
+						&{$_sub_cprop_exit}();
 						}
 					}
 
@@ -1801,7 +1814,7 @@ elsif ( -s $database ) {
 					# Failure
 					else {
 						&debug_out("permanent_update_manager(): Can't fork");
-						&pprop_exit();
+						&{$_sub_cprop_exit}();
 						}
 					}
 
@@ -1854,7 +1867,7 @@ elsif ( -s $database ) {
 						}
 					else {
 						&debug_out("permanent_update_manager(): Can't fork");
-						&pprop_exit();
+						&{$_sub_cprop_exit}();
 						}
 					}
 
@@ -3953,9 +3966,8 @@ elsif ( -s $database ) {
 				}
 			}	# End of while
 
-		&debug_out(
-			"Parent $ppid seems to be dead",
-			);
+		&debug_out("Parent $ppid seems to be dead");
+		&{$_sub_cprop_exit}(1);
 		exit(0);
 		# End of child
 		}
@@ -10452,6 +10464,13 @@ sub check_version {
 			version => "v1.9.3",
 			update => sub {
 				&debug_out(qq{update_to_1_9_3(): Regular breakdowns on main agent solved});
+				return(1);
+				},
+			},
+		{
+			version => "v1.10",
+			update => sub {
+				&debug_out(qq{update_to_1_10(): Now ultra long running the application will trigger a database cleanup after fixed hours});
 				return(1);
 				},
 			},
