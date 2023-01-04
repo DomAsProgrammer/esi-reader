@@ -91,6 +91,12 @@
 	Numbers in main table and purchase table are aligned to
 	the right now
 
+	v1.9.1
+	Make RegExes precompiled, so it can be used faster on
+	static often used pattern matches
+	Removed length cutting setting for numbers after floa-
+	ting point
+
 =end change_logs
 =cut
 
@@ -136,7 +142,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.9";
+my $app_version		= "v1.9.1";
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -466,6 +472,12 @@ my %def_TL		= (	# Toplevel widgets
 	-background		=> $def_bg_hex,
 	-title			=> $app_name,
 	);
+
+## RegEx speedup through qr precompiling
+my $is_number_regex		= qr{^[0-9]+(\.[0-9]+)?$};				# Speed regex through precompiling on qr{}
+#my $human_readable_lenght	= qr{^[0-9]+\.[0-9]{3,}$};
+my $human_readable_int_float	= qr{^([0-9]+)(\.[0-9]+)?$};
+my $human_readable_date		= qr{^([0-9]{4})-([0-9]{2})-([0-9]{2}).([0-9]{2}):([0-9]{2}):([0-9]{2}).$};
 
 ## Misc
 #my $debug_file		= (fileparse($0))[1] . "esiR_debug.log";
@@ -2957,8 +2969,10 @@ elsif ( -s $database ) {
 						}
 
 					# Decode content
-					my @stargates				= grep { $_->{content} =~ m/-stargates-/ } @stations;
-					@stations				= grep { $_->{content} =~ m/-stations-/ } @stations;
+					my $speedreg_stargates			= qr{-stargates-};
+					my $speedreg_stations			= qr{-stations-};
+					my @stargates				= grep { $_->{content} =~ m{$speedreg_stargates} } @stations;
+					@stations				= grep { $_->{content} =~ m{$speedreg_stations} } @stations;
 					foreach my $element ( @stations, @stargates ) {
 						$element->{content}	=~ s/-(stargates|stations)-//g;	# Remove identifier
 						$element		= $element->{content};
@@ -10375,6 +10389,13 @@ sub check_version {
 				return(1);
 				},
 			},
+		{
+			version => "v1.9.1",
+			update => sub {
+				&debug_out(qq{update_to_1_9_1(): No changes for database infrastructure, just runtime optimization for new regex (from v1.9});
+				return(1);
+				},
+			},
 		#{
 			#version => "v1.",
 			#update => sub {
@@ -10605,7 +10626,7 @@ sub is_number {
 	my $element		= shift;
 
 	# Integer or floating point
-	if ( $element =~ m/^[0-9]+(\.[0-9]+)?$/ ) {
+	if ( $element =~ m{$is_number_regex} ) {				# Speed regex through precompiling on qr{}
 		#&debug_out(qq{is_number(): "$element" is a number});		# Activate only when really needed, decreasing speed enormusly
 		return(1);
 		}
@@ -11716,18 +11737,18 @@ sub human_readable {
 	my $num = shift;                                         
 
 	# If it is floating with three or more places
-	if ( $num =~ m/^[0-9]+\.[0-9]{3,}$/ ) {
-		$num		= sprintf("%.2f", $num);
-		}
+	#if ( $num =~ m{$human_readable_lenght} ) {
+		#$num		= sprintf("%.2f", $num);
+		#}
 
 	# If it is a integer or floating
-	if ( $num =~ m/^([0-9]+)(\.[0-9]+)?$/ ) {
+	if ( $num =~ m{$human_readable_int_float} ) {
 		my $front	= $1;
 		my $end		= ( defined($2) ) ? $2 : "";
 		$num		= reverse(join(" ", unpack("(A3)*", reverse($front)))) . $end;
 		}
 	# Date for issued: 2020-08-15T07:14:20Z
-	elsif ( $num =~ m/^([0-9]{4})-([0-9]{2})-([0-9]{2}).([0-9]{2}):([0-9]{2}):([0-9]{2}).$/ ) {
+	elsif ( $num =~ m{$human_readable_date} ) {
 		my %time	= (
 			year	=> $1,
 			month	=> $2,
