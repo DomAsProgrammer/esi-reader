@@ -104,6 +104,9 @@
 	structure orders before inserting the new was only done
 	by the structure update agent until now
 
+	v1.9.3
+	Stability increase of main agent
+
 =end change_logs
 =cut
 
@@ -149,7 +152,7 @@ open(STDERR, ">", "/tmp/esi-reader.err") or die "Can't write STDERR file!\n";
 ## EVE connections
 ## GUI links and textes
 my $app_name		= "ESI Reader";
-my $app_version		= "v1.9.2";
+my $app_version		= "v1.9.3";
 my $MainTitle		= "$app_name $app_version - ";
 my $url_dev_apps	= "https://developers.eveonline.com/";
 my $lsburl		= "https://login.eveonline.com";	# login server base url
@@ -1040,6 +1043,9 @@ elsif ( -s $database ) {
 				%mua_known_systems		= ();
 				%mua_known_constellations	= ();
 				%mua_known_types		= ();
+
+				&priority_lock(1);
+				&db_lock(1, "decontrol");
 				foreach my $record ( &access_DB("SELECT ss_id, ss_variety, sys_id, const_id FROM locations_indices ;") ) {
 					if ( $record->{ss_variety} eq "station" ) {
 						$mua_known_stations{$record->{ss_id}}	= undef;
@@ -1057,6 +1063,8 @@ elsif ( -s $database ) {
 				foreach my $record ( &access_DB("SELECT id FROM types ;") ) {
 					$mua_known_types{$record->{id}}			= undef;
 					}
+				&db_lock(0);
+				&priority_lock(0);
 
 				# Fill dynamic arrays
 				if ( ! @mua_primary ) {
@@ -10436,7 +10444,14 @@ sub check_version {
 		{
 			version => "v1.9.2",
 			update => sub {
-				&debug_out(qq{update_to_1_9_1(): No changes for database infrastructure, just execution correction (missing DELETE on orders_structures)});
+				&debug_out(qq{update_to_1_9_2(): No changes for database infrastructure, just execution correction (missing DELETE on orders_structures)});
+				return(1);
+				},
+			},
+		{
+			version => "v1.9.3",
+			update => sub {
+				&debug_out(qq{update_to_1_9_3(): Regular breakdowns on main agent solved});
 				return(1);
 				},
 			},
@@ -11366,10 +11381,11 @@ sub main_table_perl_join {
 
 	&priority_lock(1);
 	&db_lock(1, "decontrol");	# Wait for exclusive access on next &access_DB()
-	&db_lock(0);
 
 	# Apply jumps to records
 	@jumps_list	= &access_DB(qq{SELECT origin, destination, jumps_all AS "all", jumps_high AS "high", jumps_low AS "low" FROM routes_jumps WHERE } . join(qq{ OR }, @jumps_where_clause) . qq{ ;});
+	&db_lock(0);
+	&priority_lock(0);
 	foreach my $record ( @done_hauls_table ) {
 		my @matched_routes	= grep { ( $_->{origin} == $record->{to_sid} && $_->{destination} == $record->{from_sid} ) || ( $_->{origin} == $record->{from_sid} && $_->{destination} == $record->{to_sid} ) } @jumps_list;
 
