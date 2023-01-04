@@ -112,6 +112,11 @@
 	without restarting the app, now every twelve hours the
 	database will be cleaned up (vacuum)
 
+	v1.10.1
+	BUG FIX
+	Function to properly stop all agents was executed on
+	referencing
+
 =end change_logs
 =cut
 
@@ -674,8 +679,8 @@ elsif ( -s $database ) {
 			&cprop_exit();
 			};
 
-		local $SIG{INT}		= \&{$_sub_cprop_exit}();
-		local $SIG{HUP}		= \&{$_sub_cprop_exit}();
+		local $SIG{INT}		= $_sub_cprop_exit;
+		local $SIG{HUP}		= $_sub_cprop_exit;
 
 		# Array to store what was transfered through @receiver, because IPC-tied arrays are very small (round about 300 elements only)
 		my @storage	= ();
