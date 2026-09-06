@@ -125,6 +125,7 @@ use warnings;
 
 ### Libraries
 use DBI;
+use DBD::SQLite;
 use File::Basename;
 use File::Path qw(make_path remove_tree);
 use File::Copy qw(cp move);
